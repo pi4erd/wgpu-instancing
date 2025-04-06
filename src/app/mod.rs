@@ -4,14 +4,34 @@ mod mesh;
 
 use std::{collections::HashMap, error::Error, sync::Arc, time::Instant};
 
+use bytemuck::{Pod, Zeroable};
 use camera::{Camera, CameraController};
 use draw::Drawable;
-use mesh::{DefaultVertex3d, Mesh, Vertex};
+use mesh::{DefaultVertex3d, Instance, Mesh, Vertex};
 use pollster::FutureExt;
+use rand::Rng;
 use wgpu::util::DeviceExt;
 use winit::{dpi::PhysicalSize, event::WindowEvent, keyboard::{KeyCode, PhysicalKey}, window::Window};
 
 use crate::window::Game;
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+pub struct InstanceRepr {
+    position: [f32; 3],
+}
+
+impl InstanceRepr {
+    const ATTRIBS: &'static [wgpu::VertexAttribute] = &wgpu::vertex_attr_array![
+        1 => Float32x3,
+    ];
+}
+
+impl Instance for InstanceRepr {
+    fn attribs() -> &'static [wgpu::VertexAttribute] {
+        Self::ATTRIBS
+    }
+}
 
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
@@ -46,11 +66,32 @@ pub struct App<'a> {
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
 
+    positions: Vec<[f32; 3]>,
+    velocities: Vec<[f32; 3]>,
+    instance_buffer: wgpu::Buffer,
+
     start_time: Instant,
     time: f64,
 }
 
 impl App<'_> {
+    const OBJECT_COUNT: usize = 1000;
+
+    fn generate_random_vectors(count: usize, min: cgmath::Point3<f32>, max: cgmath::Point3<f32>) -> Vec<cgmath::Vector3<f32>> {
+        let mut vectors = Vec::with_capacity(count);
+        let mut rng = rand::rng();
+
+        for _ in 0..count {
+            vectors.push(cgmath::Vector3::new(
+                rng.random_range(min.x..max.x),
+                rng.random_range(min.y..max.y),
+                rng.random_range(min.z..max.z),
+            ));
+        }
+
+        vectors
+    }
+
     pub async fn new(window: Arc<Window>) -> Result<Self, Box<dyn Error>> {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
@@ -173,6 +214,26 @@ impl App<'_> {
             ))
         );
 
+        _ = window.set_cursor_grab(winit::window::CursorGrabMode::Locked);
+        window.set_cursor_visible(false);
+
+        let positions = Self::generate_random_vectors(
+            Self::OBJECT_COUNT,
+            cgmath::Point3::new(-100.0, -100.0, -100.0),
+            cgmath::Point3::new(100.0, 100.0, 100.0),
+        ).into_iter().map(|v| v.into()).collect::<Vec<_>>();
+        let velocities = Self::generate_random_vectors(
+            Self::OBJECT_COUNT,
+            cgmath::Point3::new(-1.0, -1.0, -1.0),
+            cgmath::Point3::new(1.0, 1.0, 1.0),
+        ).into_iter().map(|v| v.into()).collect::<Vec<_>>();
+
+        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("instance_buffer"),
+            contents: bytemuck::cast_slice(&positions),
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        });
+
         Ok(Self {
             window,
             instance,
@@ -189,6 +250,10 @@ impl App<'_> {
             camera_controller,
             camera_buffer,
             camera_bind_group,
+
+            positions,
+            velocities,
+            instance_buffer,
 
             start_time: Instant::now(),
             time: 0.0,
@@ -217,6 +282,7 @@ impl App<'_> {
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 buffers: &[
                     DefaultVertex3d::desc(),
+                    InstanceRepr::desc(),
                 ]
             },
             primitive: wgpu::PrimitiveState {
@@ -253,11 +319,17 @@ impl App<'_> {
         pipeline
     }
 
-    fn update_uniforms(&self) {
+    fn update_buffers(&self) {
         self.queue.write_buffer(
             &self.camera_buffer,
             0,
             bytemuck::cast_slice(&[self.camera.uniform()]),
+        );
+
+        self.queue.write_buffer(
+            &self.instance_buffer,
+            0,
+            bytemuck::cast_slice(&self.positions)
         );
     }
 }
@@ -265,6 +337,13 @@ impl App<'_> {
 impl App<'_> {
     fn update(&mut self, delta: f64) {
         self.camera_controller.update(&mut self.camera, delta as f32);
+        
+        std::iter::zip(self.positions.iter_mut(), self.velocities.iter())
+            .for_each(|(p, v)| {
+                p[0] += v[0] * delta as f32;
+                p[1] += v[1] * delta as f32;
+                p[2] += v[2] * delta as f32;
+            });
     }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
@@ -272,7 +351,7 @@ impl App<'_> {
 
         let view = image.texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        self.update_uniforms();
+        self.update_buffers();
 
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
         {
@@ -297,7 +376,11 @@ impl App<'_> {
 
             render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
 
-            self.cube_mesh.draw(&mut render_pass);
+            self.cube_mesh.draw_instanced(
+                &mut render_pass,
+                &self.instance_buffer,
+                0..self.positions.len() as u32,
+            );
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -306,6 +389,13 @@ impl App<'_> {
         image.present();
 
         Ok(())
+    }
+
+    fn toggle_fullscreen(&self) {
+        self.window.set_fullscreen(match self.window.fullscreen() {
+            None => Some(winit::window::Fullscreen::Borderless(None)),
+            Some(_) => None,
+        });
     }
 
     fn resize(&mut self, new_size: PhysicalSize<u32>) {
@@ -350,6 +440,9 @@ impl Game for App<'_> {
                 if event.state.is_pressed() {
                     match event.physical_key {
                         PhysicalKey::Code(KeyCode::Escape) => event_loop.exit(),
+                        PhysicalKey::Code(KeyCode::KeyF) => {
+                            self.toggle_fullscreen();
+                        }
                         _ => {}
                     }
                 }
