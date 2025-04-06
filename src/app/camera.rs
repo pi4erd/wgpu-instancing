@@ -23,8 +23,8 @@ impl Camera {
             eye: Point3::new(0.0, 0.0, 1.0),
             direction: Vector3::unit_z(),
             up: Vector3::unit_y(),
-            near: 0.01,
-            far: 3000.0,
+            near: 0.1,
+            far: 10000.0,
             aspect,
         }
     }

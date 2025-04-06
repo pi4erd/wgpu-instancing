@@ -3,11 +3,13 @@ struct VertexInput {
 };
 
 struct InstanceInput {
+    @builtin(instance_index) id: u32,
     @location(1) position: vec3<f32>,
 }
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
+    @location(0) vertex_color: vec3<f32>,
 };
 
 struct Attachments {
@@ -28,12 +30,20 @@ fn vs_main(in: VertexInput, instance: InstanceInput) -> VertexOutput {
     var out: VertexOutput;
     let vpos = instance.position + in.position;
     out.clip_position = camera.projection * camera.view * vec4(vpos, 1.0);
+    
+    let x_id = instance.id % 1024;
+    let y_id = (instance.id / 1024) % 1024;
+    let z_id = (instance.id / (1024 * 1024)) % 1024;
+
+    let col_offset = 0.5 * normalize(vec3<f32>(f32(x_id) / 1024.0, f32(z_id) / 1024.0, f32(y_id) / 1024.0));
+
+    out.vertex_color = vec3(0.5, 0.5, 0.5) + col_offset;
     return out;
 }
 
 @fragment
 fn fs_main(in: VertexOutput) -> Attachments {
     var result: Attachments;
-    result.color = vec4(1.0, 1.0, 1.0, 1.0);
+    result.color = vec4(in.vertex_color, 1.0);
     return result;
 }
