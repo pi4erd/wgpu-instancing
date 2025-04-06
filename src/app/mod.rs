@@ -1,12 +1,10 @@
 mod camera;
-mod draw;
 mod mesh;
 
 use std::{collections::HashMap, error::Error, sync::Arc, time::Instant};
 
 use bytemuck::{Pod, Zeroable};
 use camera::{Camera, CameraController};
-use draw::Drawable;
 use mesh::{DefaultVertex3d, Instance, Mesh, Vertex};
 use pollster::FutureExt;
 use rand::Rng;

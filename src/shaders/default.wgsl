@@ -37,7 +37,7 @@ fn vs_main(in: VertexInput, instance: InstanceInput) -> VertexOutput {
 
     let col_offset = 0.5 * normalize(vec3<f32>(f32(x_id) / 1024.0, f32(z_id) / 1024.0, f32(y_id) / 1024.0));
 
-    out.vertex_color = vec3(0.5, 0.5, 0.5) + col_offset;
+    out.vertex_color = vec3(0.3, 0.1, 0.3) + col_offset;
     return out;
 }
 

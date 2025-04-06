@@ -1,9 +1,8 @@
-use std::ops::{AddAssign, Range};
+use std::ops::Range;
 
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
-use super::draw::Drawable;
 pub trait Vertex: Pod + Zeroable {
     fn attribs() -> &'static [wgpu::VertexAttribute];
     fn desc() -> wgpu::VertexBufferLayout<'static> {
@@ -44,46 +43,13 @@ impl Vertex for DefaultVertex3d {
     }
 }
 
-pub struct MeshInfo<T> {
-    pub vertices: Vec<T>,
-    pub indices: Vec<u32>,
-}
-
-impl<T> MeshInfo<T> {
-    pub fn new() -> Self {
-        Self {
-            vertices: Vec::new(),
-            indices: Vec::new(),
-        }
-    }
-
-    pub fn transform_vertices(&mut self, f: fn(v: &mut T)) {
-        self.vertices
-            .iter_mut()
-            .for_each(f);
-    }
-
-    pub fn merge(&mut self, mut rhs: Self) {
-        rhs.indices
-            .iter_mut()
-            .for_each(|i| *i += self.vertices.len() as u32);
-        self.indices.append(&mut rhs.indices);
-        self.vertices.append(&mut rhs.vertices);
-    }
-}
-
-impl<T> AddAssign for MeshInfo<T> {
-    fn add_assign(&mut self, rhs: Self) {
-        self.merge(rhs);
-    }
-}
-
 pub struct Mesh {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     element_count: usize,
 }
 
+#[allow(dead_code)]
 impl Mesh {
     pub fn create(device: &wgpu::Device, vertices: &[impl Vertex], indices: &[u32]) -> Self {
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -111,10 +77,6 @@ impl Mesh {
         }
     }
 
-    pub fn from_info<T: Vertex>(device: &wgpu::Device, info: MeshInfo<T>) -> Self {
-        Self::create(device, &info.vertices, &info.indices)
-    }
-
     pub fn draw_instanced(
         &self,
         render_pass: &mut wgpu::RenderPass,
@@ -127,10 +89,8 @@ impl Mesh {
 
         render_pass.draw_indexed(0..self.element_count as u32, 0, instances);
     }
-}
 
-impl Drawable for Mesh {
-    fn draw(&self, render_pass: &mut wgpu::RenderPass) {
+    pub fn draw(&self, render_pass: &mut wgpu::RenderPass) {
         // TODO: Move to bundle?
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
         render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);

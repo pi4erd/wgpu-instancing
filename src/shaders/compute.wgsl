@@ -18,7 +18,7 @@ fn force(p: vec3<f32>) -> vec3<f32> {
     let l = length(p);
     let d = -p / l;
 
-    return d * (100000.0 / l);
+    return d * (10000.0 / l);
 }
 
 @compute
