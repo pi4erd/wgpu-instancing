@@ -1,5 +1,6 @@
 mod camera;
 mod mesh;
+mod texture;
 
 use std::{collections::HashMap, error::Error, sync::Arc, time::Instant};
 
@@ -8,6 +9,7 @@ use camera::{Camera, CameraController};
 use mesh::{DefaultVertex3d, Instance, Mesh, Vertex};
 use pollster::FutureExt;
 use rand::Rng;
+use texture::Texture2d;
 use wgpu::util::DeviceExt;
 use winit::{dpi::PhysicalSize, event::WindowEvent, keyboard::{KeyCode, PhysicalKey}, window::Window};
 
@@ -67,6 +69,7 @@ pub struct App<'a> {
     surface: wgpu::Surface<'a>,
     surface_config: wgpu::SurfaceConfiguration,
     multisample_framebuffer: wgpu::TextureView,
+    depth_texture: Texture2d,
     adapter: wgpu::Adapter,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -81,6 +84,7 @@ pub struct App<'a> {
 
     positions: Vec<[f32; 3]>,
     velocities: Vec<[f32; 3]>,
+    positions_buffer_vsh: wgpu::Buffer,
     positions_buffer: wgpu::Buffer,
     velocities_buffer: wgpu::Buffer,
     pv_bind_group: wgpu::BindGroup,
@@ -91,8 +95,8 @@ pub struct App<'a> {
 }
 
 impl App<'_> {
-    const DIMENSIONS: (u32, u32, u32) = (1024, 1024, 4);
-    const WORKGROUP_DIMS: (u32, u32, u32) = (8, 8, 1);
+    const DIMENSIONS: (u32, u32, u32) = (1024, 1024, 1);
+    const WORKGROUP_DIMS: (u32, u32, u32) = (1, 1, 1);
     const OBJECT_COUNT: u32 = Self::DIMENSIONS.0 * Self::DIMENSIONS.1 * Self::DIMENSIONS.2;
     const MULTISAMPLE_SAMPLES: u32 = 8;
 
@@ -251,6 +255,13 @@ impl App<'_> {
             ]
         });
 
+        let depth_texture = Texture2d::create_depth_texture(
+            &device,
+            &surface_config,
+            Self::MULTISAMPLE_SAMPLES,
+            Some("depth_texture"),
+        );
+
         pipelines.insert(
             PipelineSelector::Default,
             Pipeline::Render(Self::default_pipeline(
@@ -277,7 +288,12 @@ impl App<'_> {
         let positions_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("positions_buffer"),
             contents: bytemuck::cast_slice(&positions),
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::STORAGE,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        });
+        let positions_buffer_vsh = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("positions_buffer_vsh"),
+            contents: bytemuck::cast_slice(&positions),
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
         let velocities_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("velocities_buffer"),
@@ -338,6 +354,7 @@ impl App<'_> {
             adapter,
             device,
             queue,
+            depth_texture,
 
             pipelines,
             cube_mesh,
@@ -349,6 +366,7 @@ impl App<'_> {
 
             positions,
             velocities,
+            positions_buffer_vsh,
             positions_buffer,
             velocities_buffer,
             pv_bind_group,
@@ -435,7 +453,13 @@ impl App<'_> {
                     })
                 ]
             }),
-            depth_stencil: None,
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: Texture2d::DEPTH_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
             multiview: None,
             cache: None,
         });
@@ -444,6 +468,15 @@ impl App<'_> {
     }
 
     fn update_buffers(&self) {
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        encoder.copy_buffer_to_buffer(
+            &self.positions_buffer, 0,
+            &self.positions_buffer_vsh, 0,
+            std::mem::size_of::<InstanceRepr>() as u64 * Self::OBJECT_COUNT as u64,
+        );
+
+        self.queue.submit(std::iter::once(encoder.finish()));
+
         self.queue.write_buffer(
             &self.camera_buffer,
             0,
@@ -507,7 +540,14 @@ impl App<'_> {
                         store: wgpu::StoreOp::Store,
                     },
                 })],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_texture.view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
@@ -520,7 +560,7 @@ impl App<'_> {
 
             self.cube_mesh.draw_instanced(
                 &mut render_pass,
-                &self.positions_buffer,
+                &self.positions_buffer_vsh,
                 0..self.positions.len() as u32,
             );
         }
@@ -548,6 +588,12 @@ impl App<'_> {
             &self.device,
             &self.surface_config,
             Self::MULTISAMPLE_SAMPLES,
+        );
+        self.depth_texture = Texture2d::create_depth_texture(
+            &self.device,
+            &self.surface_config,
+            Self::MULTISAMPLE_SAMPLES,
+            Some("depth_texture"),
         );
     }
 }
