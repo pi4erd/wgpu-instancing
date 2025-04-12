@@ -18,12 +18,12 @@ use crate::window::Game;
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
 pub struct InstanceRepr {
-    position: [f32; 3],
+    position: [f32; 4],
 }
 
 impl InstanceRepr {
     const ATTRIBS: &'static [wgpu::VertexAttribute] = &wgpu::vertex_attr_array![
-        1 => Float32x3,
+        1 => Float32x4,
     ];
 }
 
@@ -43,6 +43,7 @@ pub struct WorldInfo {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
 pub struct ComputePushConstants {
+    dimensions: [u32; 4],
     world_info: WorldInfo,
 }
 
@@ -82,8 +83,8 @@ pub struct App<'a> {
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
 
-    positions: Vec<[f32; 3]>,
-    velocities: Vec<[f32; 3]>,
+    positions: Vec<[f32; 4]>,
+    velocities: Vec<[f32; 4]>,
     positions_buffer_vsh: wgpu::Buffer,
     positions_buffer: wgpu::Buffer,
     velocities_buffer: wgpu::Buffer,
@@ -95,21 +96,22 @@ pub struct App<'a> {
 }
 
 impl App<'_> {
-    const DIMENSIONS: (u32, u32, u32) = (1024, 1024, 1);
-    const WORKGROUP_DIMS: (u32, u32, u32) = (1, 1, 1);
+    const DIMENSIONS: (u32, u32, u32, u32) = (1024, 1024, 4, 0);
+    const WORKGROUP_DIMS: (u32, u32, u32) = (8, 8, 4);
     const OBJECT_COUNT: u32 = Self::DIMENSIONS.0 * Self::DIMENSIONS.1 * Self::DIMENSIONS.2;
     const MULTISAMPLE_SAMPLES: u32 = 8;
 
-    fn generate_random_vectors(count: usize, min: cgmath::Point3<f32>, max: cgmath::Point3<f32>) -> Vec<cgmath::Vector3<f32>> {
+    fn generate_random_vectors(count: usize, min: cgmath::Point3<f32>, max: cgmath::Point3<f32>) -> Vec<[f32; 4]> {
         let mut vectors = Vec::with_capacity(count);
         let mut rng = rand::rng();
 
         for _ in 0..count {
-            vectors.push(cgmath::Vector3::new(
+            vectors.push([
                 rng.random_range(min.x..max.x),
                 rng.random_range(min.y..max.y),
                 rng.random_range(min.z..max.z),
-            ));
+                1.0,
+            ]);
         }
 
         vectors
@@ -390,7 +392,7 @@ impl App<'_> {
                 wgpu::PushConstantRange {
                     stages: wgpu::ShaderStages::COMPUTE,
                     range: 0..std::mem::size_of::<ComputePushConstants>() as u32,
-                }
+                },
             ],
         });
         let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
@@ -415,7 +417,12 @@ impl App<'_> {
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("default_pipeline_layout"),
             bind_group_layouts,
-            push_constant_ranges: &[],
+            push_constant_ranges: &[
+                wgpu::PushConstantRange {
+                    stages: wgpu::ShaderStages::VERTEX,
+                    range: 0..std::mem::size_of::<ComputePushConstants>() as u32,
+                }
+            ],
         });
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -504,7 +511,8 @@ impl App<'_> {
             compute_pass.set_bind_group(0, &self.pv_bind_group, &[]);
 
             let push_constants = ComputePushConstants {
-                world_info: WorldInfo { time: self.time as f32, delta: self.last_delta as f32 }
+                world_info: WorldInfo { time: self.time as f32, delta: self.last_delta as f32 },
+                dimensions: Self::DIMENSIONS.into(),
             };
             compute_pass.set_push_constants(0, bytemuck::bytes_of(&push_constants));
 
@@ -557,6 +565,15 @@ impl App<'_> {
             }
 
             render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+            let push_constants = ComputePushConstants {
+                world_info: WorldInfo { time: self.time as f32, delta: self.last_delta as f32 },
+                dimensions: Self::DIMENSIONS.into(),
+            };
+            render_pass.set_push_constants(
+                wgpu::ShaderStages::VERTEX,
+                0,
+                bytemuck::bytes_of(&push_constants)
+            );
 
             self.cube_mesh.draw_instanced(
                 &mut render_pass,

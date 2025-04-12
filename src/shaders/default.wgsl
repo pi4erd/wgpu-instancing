@@ -4,7 +4,7 @@ struct VertexInput {
 
 struct InstanceInput {
     @builtin(instance_index) id: u32,
-    @location(1) position: vec3<f32>,
+    @location(1) position: vec4<f32>,
 }
 
 struct VertexOutput {
@@ -22,20 +22,36 @@ struct Camera {
     projection: mat4x4<f32>,
 };
 
+struct WorldInfo {
+    time: f32,
+    delta: f32,
+};
+
+struct PushConstants {
+    dimensions: vec3<u32>,
+    world_info: WorldInfo,
+}
+
+var<push_constant> push_constants: PushConstants;
+
 @group(0) @binding(0)
 var<uniform> camera: Camera;
 
 @vertex
 fn vs_main(in: VertexInput, instance: InstanceInput) -> VertexOutput {
     var out: VertexOutput;
-    let vpos = instance.position + in.position;
+    let vpos = instance.position.xyz + in.position;
     out.clip_position = camera.projection * camera.view * vec4(vpos, 1.0);
     
-    let x_id = instance.id % 1024;
-    let y_id = (instance.id / 1024) % 1024;
-    let z_id = (instance.id / (1024 * 1024)) % 1024;
+    let x_id = instance.id % push_constants.dimensions.x;
+    let y_id = (instance.id / push_constants.dimensions.x) % push_constants.dimensions.y;
+    let z_id = (instance.id / (push_constants.dimensions.x * push_constants.dimensions.y)) % push_constants.dimensions.z;
 
-    let col_offset = 0.5 * normalize(vec3<f32>(f32(x_id) / 1024.0, f32(z_id) / 1024.0, f32(y_id) / 1024.0));
+    let col_offset = 0.5 * normalize(vec3<f32>(
+        f32(x_id) / f32(push_constants.dimensions.x),
+        f32(z_id) / f32(push_constants.dimensions.z),
+        f32(y_id) / f32(push_constants.dimensions.y)
+    ));
 
     out.vertex_color = vec3(0.3, 0.1, 0.3) + col_offset;
     return out;
