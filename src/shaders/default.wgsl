@@ -53,7 +53,7 @@ fn vs_main(in: VertexInput, instance: InstanceInput) -> VertexOutput {
         f32(y_id) / f32(push_constants.dimensions.y)
     ));
 
-    out.vertex_color = vec3(0.3, 0.1, 0.3) + col_offset;
+    out.vertex_color = vec3(0.5, 0.1, 0.5) + col_offset;
     return out;
 }
 

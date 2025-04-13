@@ -93,6 +93,7 @@ pub struct App<'a> {
     start_time: Instant,
     time: f64,
     last_delta: f64,
+    paused: bool,
 }
 
 impl App<'_> {
@@ -167,6 +168,8 @@ impl App<'_> {
             },
             memory_hints: wgpu::MemoryHints::Performance,
         }, None).await?;
+
+        log::info!("Selected device {} with driver {}.", adapter.get_info().name, adapter.get_info().driver);
 
         let size = window.inner_size();
         let mut surface_config = surface.get_default_config(&adapter, size.width, size.height)
@@ -283,8 +286,8 @@ impl App<'_> {
         ).into_iter().map(|v| v.into()).collect::<Vec<_>>();
         let velocities = Self::generate_random_vectors(
             Self::OBJECT_COUNT as usize,
-            cgmath::Point3::new(-1.0, -1.0, -1.0),
-            cgmath::Point3::new(1.0, 1.0, 1.0),
+            cgmath::Point3::new(-20.0, -20.0, -20.0),
+            cgmath::Point3::new(20.0, 20.0, 20.0),
         ).into_iter().map(|v| v.into()).collect::<Vec<_>>();
 
         let positions_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -376,6 +379,7 @@ impl App<'_> {
             start_time: Instant::now(),
             time: 0.0,
             last_delta: 0.001,
+            paused: false,
         })
     }
 
@@ -498,7 +502,7 @@ impl App<'_> {
         self.last_delta = delta;
 
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-        {
+        if !self.paused {
             let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("compute_pass"),
                 timestamp_writes: None,
@@ -652,6 +656,9 @@ impl Game for App<'_> {
                         PhysicalKey::Code(KeyCode::Escape) => event_loop.exit(),
                         PhysicalKey::Code(KeyCode::KeyF) => {
                             self.toggle_fullscreen();
+                        }
+                        PhysicalKey::Code(KeyCode::KeyP) => {
+                            self.paused = !self.paused;
                         }
                         _ => {}
                     }
