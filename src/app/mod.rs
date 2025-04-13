@@ -227,7 +227,7 @@ impl App<'_> {
         );
 
         let camera = Camera::new(size.width as f32 / size.height as f32);
-        let camera_controller = CameraController::new(1.0, 0.005);
+        let camera_controller = CameraController::new(1.0, 0.001);
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("camera_buffer"),
             contents: bytemuck::cast_slice(&[camera.uniform()]),

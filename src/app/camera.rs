@@ -24,7 +24,7 @@ impl Camera {
             direction: Vector3::unit_z(),
             up: Vector3::unit_y(),
             near: 0.1,
-            far: 10000.0,
+            far: 40000.0,
             aspect,
         }
     }
